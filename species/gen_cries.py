@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gen_cries.py — synthesize the AI species calls of the RAPPid Zoo.
+gen_cries.py — synthesize the AI species calls of RAPPID.
 
 Each AI on this machine is a species. Each species has ONE cry, unique in timbre,
 pitch contour, and rhythm, so it can be identified by ear alone with no screen.

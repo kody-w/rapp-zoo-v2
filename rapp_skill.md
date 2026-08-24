@@ -1,7 +1,7 @@
-# rapp_skill: rappid-zoo
+# rapp_skill: rappid
 
 > Drop this file into any RAPP-aware agent's skills directory (or paste it into
-> its context). It teaches the agent to run the RAPPid Zoo species layer with
+> its context). It teaches the agent to run RAPPID species layer with
 > the tools it already has. Brainstem-native form; if your platform can't use
 > this, read `SKILL.md` instead — it teaches the same thing from zero.
 

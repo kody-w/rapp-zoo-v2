@@ -198,6 +198,51 @@ SPECIES = {
         patterns=[("glow",0.4),("spot",0.3),("stripe",0.2),("solid",0.1)], limbs=(0,8), glow=(0.35,0.60)),
 }
 
+
+# ─────────────────────────────────────────────── anchors: born of a thing
+ANCHOR_KINDS = {
+    ".md": "journal", ".txt": "journal", ".rtf": "journal",
+    ".jpg": "image", ".jpeg": "image", ".png": "image", ".heic": "image", ".gif": "image",
+    ".mp4": "video", ".mov": "video", ".m4v": "video",
+    ".mp3": "audio", ".wav": "audio", ".m4a": "audio",
+    ".pdf": "document",
+}
+
+def make_anchor(source, title=None):
+    """A creature can be born OF something: a journal entry, a photo, a clip —
+    whatever the keeper found worth keeping. The artifact's digest shapes the
+    creature's genome, so the thing it came from is visible in what it looks
+    like. The bytes themselves never travel: only the digest, kind, and title."""
+    source = os.path.expanduser(str(source))
+    if os.path.exists(source):
+        h = hashlib.sha256()
+        size = 0
+        with open(source, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+                size += len(chunk)
+        ext = os.path.splitext(source)[1].lower()
+        return {
+            "schema": "rappid-anchor/1",
+            "kind": ANCHOR_KINDS.get(ext, "artifact"),
+            "sha256": h.hexdigest(),
+            "title": title or os.path.basename(source),
+            "bytes": size,
+            "held_at": os.path.abspath(source),   # local pointer, never shared
+            "at": now_iso(),
+        }
+    # not a path: the keeper anchored a thought, a URL, a line worth keeping
+    text = str(source)
+    kind = "link" if text.startswith(("http://", "https://")) else "note"
+    return {
+        "schema": "rappid-anchor/1",
+        "kind": kind,
+        "sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "title": title or (text if len(text) <= 80 else text[:77] + "…"),
+        "bytes": len(text.encode()),
+        "at": now_iso(),
+    }
+
 # ─────────────────────────────────────────────── genome minting (species-biased Duneheart schema)
 def generate_genome(species: str, seed: str):
     sp = SPECIES[species]
@@ -419,18 +464,35 @@ def play_hatch_fanfare(rec):
     play_cry(rec, wait=True)
 
 # ─────────────────────────────────────────────── lifecycle commands
-def cmd_hatch(species, quiet=False, midwife=None, attempts=3):
+def cmd_hatch(species, quiet=False, midwife=None, attempts=3, anchor=None, anchor_title=None):
     """A rappid is born only when an LLM attests it (SPEC §12). The species
     itself breaks a cypher derived from the creature's own rappid id and
     autocompletes the motif that becomes its voice. Unsealed = never written."""
     if species not in SPECIES:
         sys.exit(f"unknown species '{species}' — known: {', '.join(SPECIES)}")
-    rec = load_record(species)
-    if rec:  # idempotent re-hatch: reuse the stored record (rapp/1)
-        return rec, False
-    seed = f"rappid:{species}:{hostslug()}:{uuid.uuid4().hex[:8]}"
-    genome = generate_genome(species, seed)
-    rec = mint_record(species, genome)
+    anchor_doc = make_anchor(anchor, anchor_title) if anchor else None
+    if anchor_doc:
+        # a creature born of a thing is its OWN creature, even of the same species
+        existing = next((r for r in all_records()
+                         if (r.get("birth") or {}).get("anchor", {}).get("sha256")
+                         == anchor_doc["sha256"]), None)
+        if existing:
+            if not quiet:
+                print(f"🪢  {existing['display_name']} was already born of "
+                      f"“{anchor_doc['title']}” — one creature per anchor.")
+            return existing, False
+        seed = f"rappid:{species}:{hostslug()}:anchor:{anchor_doc['sha256'][:16]}"
+        slug = f"{species}-{safe_slug(os.path.splitext(anchor_doc['title'])[0].lower()) or anchor_doc['sha256'][:8]}"
+        genome = generate_genome(species, seed)
+        rec = mint_record(species, genome, slug=slug, dirname=slug)
+        rec["display_name"] = f"{SPECIES[species]['name']} of “{anchor_doc['title']}”"
+    else:
+        rec = load_record(species)
+        if rec:  # idempotent re-hatch: reuse the stored record (rapp/1)
+            return rec, False
+        seed = f"rappid:{species}:{hostslug()}:{uuid.uuid4().hex[:8]}"
+        genome = generate_genome(species, seed)
+        rec = mint_record(species, genome)
     log = (lambda *a: None) if quiet else print
     hatchers = {**discovered_adapters(), **rite.load_hatchers(_HERE, DEX_HOME)}
     birth, exhaust = rite.attend_birth(rec["rappid"], species, hatchers,
@@ -440,6 +502,9 @@ def cmd_hatch(species, quiet=False, midwife=None, attempts=3):
         log("🥚  the egg stays an egg — no LLM attested this birth, so there is no rappid.")
         return None, False
     transcript = birth.pop("_transcript", [])
+    if anchor_doc:
+        birth["anchor"] = {k: v for k, v in anchor_doc.items() if k != "held_at"}
+        rec["anchor_held_at"] = anchor_doc.get("held_at", "")   # local only
     rec["birth"] = birth
     rec["voice"] = rite.motif_voice(birth["motif"], birth["register"])
     d = save_record(rec)
@@ -451,6 +516,9 @@ def cmd_hatch(species, quiet=False, midwife=None, attempts=3):
         print(f"🥚→🐣  {rec['display_name']} hatched!  [{rec['rarity']}]  {rec['genome_id']}")
         print(f"       {rec['rappid']}")
         print(f"       sealed by {birth['midwife']['name']} · birth song {os.path.basename(rec['midi'])}")
+        if anchor_doc:
+            print(f"       born of the {anchor_doc['kind']} “{anchor_doc['title']}” "
+                  f"({anchor_doc['sha256'][:12]})")
     return rec, True
 
 def cmd_roar(species, done=False):
@@ -753,7 +821,7 @@ def cmd_party_qr(out=None):
                 "svg{background:#fff;border-radius:14px;padding:10px;width:min(76vmin,520px);height:auto}"
                 "h1{color:#ffcf5c;letter-spacing:.08em}p{color:#8d96a0;max-width:56ch;text-align:center}"
                 "</style></head><body><h1>FIELD HOTLINK</h1>"
-                f"<p>Scan with the RAPPid Zoo companion to carry the <b>{hostslug()}</b> "
+                f"<p>Scan with RAPPID companion to carry the <b>{hostslug()}</b> "
                 "party into the field. Full genomes travel by AirDrop "
                 "(<code>party export</code>); scanning loads the party instantly.</p>"
                 + svg + "</body></html>")
@@ -773,6 +841,9 @@ def cmd_discover(name, command, shape="cli", model=None, genus=None):
     slug = safe_slug(name.lower(), fallback="")
     if not slug:
         sys.exit("a species needs a name")
+    if slug in SPECIES and slug not in read_discovered():
+        sys.exit(f"'{slug}' is already a species the zoo ships — discovering under that "
+                 f"name would take over its midwife. Give this one a name of its own.")
     hatchers = rite.load_hatchers(_HERE, DEX_HOME)
     probe_id = hashlib.sha256(f"discover:{slug}:{hostslug()}".encode()).hexdigest()
     hatchers[slug] = {"command": command, "shape": shape, "model": model or slug,
@@ -798,11 +869,7 @@ def cmd_discover(name, command, shape="cli", model=None, genus=None):
     with open(path, "w") as f:
         json.dump(stored, f, indent=2)
     dex_path = os.path.join(DEX_HOME, "discovered-species.json")
-    try:
-        with open(dex_path) as f:
-            found = json.load(f)
-    except OSError:
-        found = {}
+    found = read_discovered()
     lo, hi = birth["register"]
     r = mk_rng(birth["seal"])
     found[slug] = {
@@ -836,32 +903,40 @@ def cmd_discover(name, command, shape="cli", model=None, genus=None):
     return found[slug]
 
 
+def read_discovered():
+    """The device's own dex. A torn or hand-edited file is a warning, never a
+    reason for every command to stop working."""
+    path = os.path.join(DEX_HOME, "discovered-species.json")
+    try:
+        with open(path) as f:
+            found = json.load(f)
+        return found if isinstance(found, dict) else {}
+    except OSError:
+        return {}
+    except ValueError:
+        print(f"⚠️  {path} is unreadable — ignoring the discovered species in it")
+        return {}
+
+
 def discovered_adapters():
     """Adapters carried by dex entries themselves — so a discovered species is
     always hatchable from the dex alone, with or without a separate registry."""
-    try:
-        with open(os.path.join(DEX_HOME, "discovered-species.json")) as f:
-            found = json.load(f)
-    except OSError:
-        return {}
-    return {slug: d["adapter"] for slug, d in found.items() if d.get("adapter")}
+    return {slug: d["adapter"] for slug, d in read_discovered().items()
+            if isinstance(d, dict) and d.get("adapter")}
 
 
 def _load_discovered():
     """Species learned on this device join the registry at import time."""
-    try:
-        with open(os.path.join(DEX_HOME, "discovered-species.json")) as f:
-            found = json.load(f)
-    except OSError:
-        return
-    for slug, d in found.items():
-        SPECIES.setdefault(slug, dict(
+    for slug, d in read_discovered().items():
+        if slug in SPECIES or not isinstance(d, dict):
+            continue          # a learned species never overwrites a shipped one
+        SPECIES[slug] = dict(
             name=d.get("name", slug), genus=d.get("genus", "Inventa"),
             blurb=d.get("blurb", "A species discovered on this device."),
             palettes=d.get("palettes") or [["#f2d49b", "#d59a4e", "#8a4f22", "#ff9d3c"]],
             shapes=[("blob", 0.4), ("star", 0.35), ("ring", 0.25)], symmetry_radial=0.5,
             patterns=[("glow", 0.4), ("spot", 0.35), ("stripe", 0.25)],
-            limbs=(1, 6), glow=(0.45, 0.45)))
+            limbs=(1, 6), glow=(0.45, 0.45))
 
 
 
@@ -870,7 +945,7 @@ def _load_discovered():
 def _record_dir_of(rec):
     return os.path.join(RAPPIDS, rec["dir"])
 
-def cmd_mutate(key, kind, note=""):
+def cmd_mutate(key, kind, note="", anchor=None, anchor_title=None):
     """A creature earns a new frame from something it met. Its new sound grows
     out of its own birth motif, so it still sounds like itself."""
     rec = find_record(key)
@@ -880,10 +955,17 @@ def cmd_mutate(key, kind, note=""):
         sys.exit(f"{rec['display_name']} has no birth to grow from — `bless` it first (SPEC §12)")
     d = _record_dir_of(rec)
     frames = molting.read_frames(d, rec)
+    anchor_doc = make_anchor(anchor, anchor_title) if anchor else None
     try:
-        frame = molting.mutate(rec, kind, note or f"met something that needed {kind}", hostslug())
+        frame = molting.mutate(rec, kind, note or (anchor_doc or {}).get("title")
+                               or f"met something that needed {kind}", hostslug())
     except ValueError as e:
         sys.exit(str(e))
+    if anchor_doc:
+        # a mutation can carry ANY media: the thing it met rides in the frame,
+        # by digest and title only — the bytes stay where the keeper put them
+        frame["anchor"] = {k: v for k, v in anchor_doc.items() if k != "held_at"}
+        frame["id"] = molting.frame_id({k: v for k, v in frame.items() if k != "id"})
     before = len(frames)
     frames.append(frame)
     molting.write_frames(d, frames)
@@ -894,6 +976,8 @@ def cmd_mutate(key, kind, note=""):
     print(f"{'🧬' if grew else '↩︎'}  {rec['display_name']} "
           f"{'grew a' if grew else 'already had that'} {kind} voice "
           f"· {molting.MUTATION_KINDS[kind]['why']}")
+    if frame.get("anchor"):
+        print(f"    from the {frame['anchor']['kind']} “{frame['anchor']['title']}”")
     print(f"    motif {' '.join(str(n) for n in frame['motif'])} · "
           f"traits {', '.join(form['traits']) or 'none'} · molt {form['molt_id']}")
     return rec
@@ -904,7 +988,10 @@ def cmd_frames(key):
         sys.exit(f"no rappid matching '{key}'")
     frames = molting.read_frames(_record_dir_of(rec), rec)
     form = molting.fold(frames)
-    print(f"{rec['display_name']} — molt {form['molt_id']}, {form['frames']} frame(s)")
+    print(f"{rec['display_name']} — {form['standing']}, molt {form['molt_id']}")
+    if form.get("anchor"):
+        print(f"  born of:    the {form['anchor']['kind']} “{form['anchor']['title']}”")
+    print(f"  adapted to: {form['mutations']} thing(s) it met")
     print(f"  dimensions: {', '.join(form['dimensions']) or hostslug()}")
     print(f"  traits:     {', '.join(form['traits']) or 'none yet'}")
     for f in molting.order(frames):
@@ -945,17 +1032,79 @@ def cmd_molt(key, other_path=None):
     print(f"    traits now: {', '.join(form['traits']) or 'none'}")
     return form
 
+
+# ─────────────────────────────────────────────── shapes: the key to a species
+# A rappid SHAPE is a RAPP agent.py — the exact, runnable way to speak to one
+# species of AI. Meeting a species once and keeping its shape means never having
+# to hand that kind of AI a skill file again: the dex already holds the key.
+# A shape has physical dimensions, because it is a real thing with a real size:
+# its WEIGHT is how much shape there is (the agent's bytes), and its HEIGHT is
+# how much reach it has (its structure).
+def shape_stats(source: str) -> dict:
+    """Height and weight of a species' shape, read from the shape itself."""
+    data = source.encode()
+    lines = [l for l in source.splitlines() if l.strip()]
+    reach = sum(1 for l in lines if l.lstrip().startswith(("def ", "class ", '"')))
+    return {
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+        "lines": len(lines),
+        # a creature's dimensions, deterministic from its shape
+        "weight_kb": round(len(data) / 1024, 2),
+        "height_m": round(0.4 + min(3.6, len(lines) / 60 + reach / 40), 2),
+    }
+
+
+def shape_card(slug, d, stats):
+    lo, hi = d.get("register", [48, 84])
+    return (f"{d.get('name', slug)}  ({d.get('genus', 'Inventa')})\n"
+            f"  HT {stats['height_m']:.2f} m   WT {stats['weight_kb']:.2f} kb\n"
+            f"  shape   {stats['lines']} lines · {stats['bytes']} bytes · "
+            f"{stats['sha256'][:12]}\n"
+            f"  reached {d.get('shape', 'cli')} · register {lo}-{hi}\n"
+            f"  key     the agent.py IS the key: install it and this species "
+            f"answers without ever being handed a skill again")
+
+
+def cmd_shape(slug, install=None, show_source=False):
+    """Show — or install — the key to a species you have already met."""
+    found = read_discovered()
+    d = found.get(slug)
+    if not d:
+        known = ", ".join(found) or "none discovered yet"
+        sys.exit(f"'{slug}' is not a species this dex has met (known: {known})")
+    source = d.get("shape_source")
+    if not source:
+        emitted = cmd_emit(slug)
+        source = open(emitted["agent"]).read()
+        d = read_discovered().get(slug, d)
+    stats = d.get("shape_stats") or shape_stats(source)
+    if show_source:
+        print(source)
+        return source
+    print(shape_card(slug, d, stats))
+    if install:
+        target = os.path.expanduser(install)
+        os.makedirs(target, exist_ok=True)
+        path = os.path.join(target, f"{safe_slug(slug)}_hatcher_agent.py")
+        with open(path, "w") as f:
+            f.write(source)
+        print(f"\n🔑  shape installed → {path}")
+        print("    that species can now be reached from here, no skill file needed")
+    return stats
+
 # ─────────────────────────────────────────────── emit: lock in a species' shape
 AGENT_TEMPLATE = '''"""
-{slug}_hatcher_agent.py — RAPP agent for the {name} species.
+{slug}_hatcher_agent.py — RAPP agent for a discovered species.
 
-Emitted by the RAPPid Zoo when {name} was discovered on {host} ({discovered_at}).
-The shape below is not guessed: it is the shape {name} actually answered in
-during its rite (SPEC §12-13) — {shape}, register {lo}-{hi}, first motif
-{motif}.
+Emitted by RAPPID from the shape this species actually answered in
+during its rite (SPEC §12-13): {shape}, register {lo}-{hi}.
 
 Drop into ~/.brainstem/agents/. The model gets a tool called {tool} that puts
-work to {name} through that exact shape, and can attest births with it.
+work to it through that exact shape, and can attest births with it.
+
+Every value that came from outside — the species' name, its command — lives in
+SPECIES_SHAPE below as data. None of it is interpolated into this file's code.
 """
 from __future__ import annotations
 
@@ -969,27 +1118,27 @@ try:
 except ImportError:
     from basic_agent import BasicAgent
 
+# The species' locked-in shape — data, never code.
+SPECIES_NAME = {name_lit}
+SPECIES_SHAPE = {shape_json}
+
 __manifest__ = {{
     "schema": "rapp-agent/1.0",
     "name": "@{owner}/{slug}-hatcher",
     "version": "1.0.0",
-    "display_name": "{name} Hatcher",
+    "display_name": SPECIES_NAME + " Hatcher",
     "description": (
-        "Speaks to {name} in the shape it answered in during its rite, and can "
-        "attest RAPPid births as its midwife."
+        "Speaks to " + SPECIES_NAME + " in the shape it answered in during its "
+        "rite, and can attest RAPPid births as its midwife."
     ),
-    "author": "RAPPid Zoo",
+    "author": "RAPPID",
     "tags": ["rappid", "hatcher", "midwife", "{slug}"],
     "category": "platform",
     "requires_env": [],
     "dependencies": ["@rapp/basic_agent"],
     "external_prereqs": {prereqs},
-    "example_call": "Ask {name} to summarize this, or attest a birth as midwife.",
+    "example_call": "Ask " + SPECIES_NAME + " to summarize this, or attest a birth as midwife.",
 }}
-
-# The species' locked-in shape.
-SPECIES_SHAPE = {shape_json}
-
 
 class {tool}(BasicAgent):
     def __init__(self):
@@ -1000,8 +1149,9 @@ class {tool}(BasicAgent):
             "parameters": {{
                 "type": "object",
                 "properties": {{
-                    "prompt": {{"type": "string", "description": "what to put to {name}"}},
-                    "timeout": {{"type": "integer", "description": "seconds (default {timeout})"}},
+                    "prompt": {{"type": "string",
+                                "description": "what to put to " + SPECIES_NAME}},
+                    "timeout": {{"type": "integer", "description": "seconds"}},
                 }},
                 "required": ["prompt"],
             }},
@@ -1010,24 +1160,24 @@ class {tool}(BasicAgent):
 
     def perform(self, prompt="", timeout=None, **kwargs):
         if not prompt:
-            return "Nothing to put to {name}."
+            return "Nothing to put to " + SPECIES_NAME + "."
         command = (SPECIES_SHAPE["command"]
                    .replace("{{prompt_json}}", shlex.quote(json.dumps(prompt)))
                    .replace("{{prompt}}", shlex.quote(prompt)))
         try:
             proc = subprocess.run(command, shell=True, capture_output=True, text=True,
-                                  timeout=timeout or SPECIES_SHAPE.get("timeout", {timeout}))
+                                  timeout=timeout or SPECIES_SHAPE.get("timeout", 240))
         except subprocess.TimeoutExpired:
-            return "{name} did not answer in time."
+            return SPECIES_NAME + " did not answer in time."
         except OSError as e:
-            return f"{name} could not be reached: {{e}}"
+            return SPECIES_NAME + " could not be reached: " + str(e)
         out = (proc.stdout or "").strip() or (proc.stderr or "").strip()
-        return out or "({name} answered with nothing.)"
+        return out or "(" + SPECIES_NAME + " answered with nothing.)"
 '''
 
 SKILL_TEMPLATE = '''# rapp_skill: {slug}
 
-> Emitted by the RAPPid Zoo on {discovered_at}, from what {name} actually did —
+> Emitted by RAPPID on {discovered_at}, from what {name} actually did —
 > not from a guess about it. Feed this to any RAPP-aware agent and it can put
 > work to {name}, and hatch {name} rappids, at full fidelity.
 
@@ -1081,11 +1231,7 @@ a `{tool}` tool.
 
 def cmd_emit(slug, out_dir=None):
     """Lock in a discovered species' shape as a usable agent.py + rapp_skill.md."""
-    try:
-        with open(os.path.join(DEX_HOME, "discovered-species.json")) as f:
-            found = json.load(f)
-    except OSError:
-        found = {}
+    found = read_discovered()
     d = found.get(slug)
     hatchers = rite.load_hatchers(_HERE, DEX_HOME)
     entry = hatchers.get(slug) or (d or {}).get("adapter")
@@ -1093,27 +1239,45 @@ def cmd_emit(slug, out_dir=None):
         sys.exit(f"'{slug}' is not a discovered species on this device — "
                  f"run `discover` first (known: {', '.join(found) or 'none'})")
     tool = "".join(part.capitalize() for part in re.split(r"[^A-Za-z0-9]+", slug) if part) + "Hatcher"
+    if not tool[:1].isalpha():
+        tool = "Species" + tool          # a class name must start with a letter
     lo, hi = d.get("register", [48, 84])
     fields = dict(
-        slug=slug, name=d.get("name", slug), genus=d.get("genus", "Inventa"),
+        slug=safe_slug(slug), name=d.get("name", slug), genus=d.get("genus", "Inventa"),
+        name_lit=json.dumps(str(d.get("name", slug))),   # a literal, never code
         host=d.get("host", hostslug()), discovered_at=d.get("discovered_at", now_iso()),
-        shape=entry.get("shape", "cli"), lo=lo, hi=hi,
+        shape=safe_slug(entry.get("shape", "cli"), fallback="cli"),
+        lo=int(lo), hi=int(hi),
         motif=" ".join(str(n) for n in d.get("motif", [])),
         seal=d.get("seal", ""), command=entry.get("command", ""),
-        timeout=entry.get("timeout", 240), tool=tool, owner=owner(),
+        timeout=int(entry.get("timeout", 240) or 240), tool=tool,
+        owner=safe_slug(owner(), fallback="local"),
         prereqs=json.dumps([entry.get("model")] if entry.get("model") else []),
         shape_json=json.dumps({k: v for k, v in entry.items() if k != "discovered"}, indent=4),
     )
     out_dir = out_dir or os.path.join(DEX_HOME, "emit", slug)
     os.makedirs(os.path.join(out_dir, "agents"), exist_ok=True)
     agent_path = os.path.join(out_dir, "agents", f"{slug}_hatcher_agent.py")
+    agent_src = AGENT_TEMPLATE.format(**fields)
+    try:
+        compile(agent_src, agent_path, "exec")   # never write an agent that cannot run
+    except SyntaxError as e:
+        sys.exit(f"refusing to emit a broken agent for '{slug}': {e}")
     with open(agent_path, "w") as f:
-        f.write(AGENT_TEMPLATE.format(**fields))
-    skill_path = os.path.join(out_dir, f"{slug}.rapp_skill.md")
+        f.write(agent_src)
+    skill_path = os.path.join(out_dir, f"{safe_slug(slug)}.rapp_skill.md")
     with open(skill_path, "w") as f:
         f.write(SKILL_TEMPLATE.format(**fields))
-    compile(open(agent_path).read(), agent_path, "exec")   # never emit a broken agent
-    print(f"🍞  {d.get('name', slug)}'s shape is locked in:")
+    # the shape goes INTO the dex: meeting this species again needs no skill file
+    stats = shape_stats(agent_src)
+    found_now = read_discovered()
+    if slug in found_now:
+        found_now[slug]["shape_source"] = agent_src
+        found_now[slug]["shape_stats"] = stats
+        with open(os.path.join(DEX_HOME, "discovered-species.json"), "w") as f:
+            json.dump(found_now, f, indent=2)
+    print(f"🍞  {d.get('name', slug)}'s shape is locked in — "
+          f"HT {stats['height_m']:.2f} m, WT {stats['weight_kb']:.2f} kb:")
     print(f"    {agent_path}")
     print(f"    {skill_path}")
     return {"agent": agent_path, "skill": skill_path}
@@ -1149,6 +1313,222 @@ def cmd_bless(key, midwife=None, attempts=3):
           f"motif {' '.join(str(n) for n in birth['motif'])}")
     return rec
 
+
+
+# ─────────────────────────────────────────────── DOGG: the front door
+# GODD is the private layer and it stays on the device. DOGG is the public face:
+# a front door published from the owner's own repo, which is what lets a creature
+# be summoned from anywhere. Summoning fetches the public projection; whatever
+# private layer the summoner holds is laid over it afterwards. Two faces, one
+# creature — and the private one never travels.
+DOGG_SCHEMA = "rappid-frontdoor/1"
+CHANT_WORDS = ["ember", "hollow", "quartz", "tidal", "vessel", "marrow", "lantern",
+               "thicket", "basalt", "cinder", "willow", "fathom", "granite", "sable",
+               "harbor", "kestrel", "amber", "furrow", "lichen", "brindle"]
+
+def chant_for(rec):
+    """A phrase a keeper can say out loud to call this creature from anywhere.
+    Deterministic from its identity, so the chant is as permanent as the rappid."""
+    h = hashlib.sha256(rec["rappid"].encode()).digest()
+    words = [CHANT_WORDS[h[i] % len(CHANT_WORDS)] for i in range(3)]
+    return "-".join(words) + "-" + h[3:5].hex()
+
+def front_door(rec, frames):
+    """The public projection: everything needed to know and render the creature,
+    and nothing that was ever private."""
+    form = molting.fold(frames)
+    birth = rec.get("birth") or {}
+    public_birth = {k: birth.get(k) for k in
+                    ("rite", "challenge_id", "cypher", "decode", "motif", "seal",
+                     "attested_at", "blessed")}
+    if birth.get("midwife"):
+        public_birth["midwife"] = {"name": birth["midwife"].get("name"),
+                                   "shape": birth["midwife"].get("shape")}
+    if birth.get("anchor"):   # what it was born of: kind and title only, never bytes
+        public_birth["anchor"] = {k: birth["anchor"].get(k) for k in ("kind", "title", "sha256")}
+    if birth.get("transcript"):   # the birthday's fingerprint, never its words
+        public_birth["transcript"] = {"sha256": birth["transcript"].get("sha256"),
+                                      "turns": birth["transcript"].get("turns")}
+    public_frames = []
+    for f in molting.order(frames):
+        pf = {k: f[k] for k in ("schema", "kind", "mutation", "role", "at", "host", "motif", "id")
+              if k in f}
+        if f.get("anchor"):
+            pf["anchor"] = {k: f["anchor"].get(k) for k in ("kind", "title", "sha256")}
+        public_frames.append(pf)
+    return {
+        "schema": DOGG_SCHEMA,
+        "chant": chant_for(rec),
+        "rappid": rec["rappid"],
+        "species": rec.get("species"),
+        "genus": rec.get("genus"),
+        "display_name": rec.get("display_name"),
+        "rarity": rec.get("rarity"),
+        "genome_id": rec.get("genome_id"),
+        "egg": rec.get("egg"),
+        "birth": {k: v for k, v in public_birth.items() if v is not None},
+        "frames": public_frames,
+        "life": {k: form.get(k) for k in ("standing", "traits", "dimensions", "molt_id",
+                                          "frames", "mutations", "anchor")},
+        "shape": shape_of_species(rec.get("species")),
+        "published_at": now_iso(),
+        "published_by": owner(),
+    }
+
+def shape_of_species(slug):
+    """A species' key, as it travels: the agent.py plus its dimensions."""
+    d = read_discovered().get(slug or "")
+    if not d or not d.get("shape_source"):
+        return None
+    return {"agent_py": d["shape_source"], "stats": d.get("shape_stats"),
+            "adapter_shape": d.get("shape"), "name": d.get("name", slug)}
+
+
+def cmd_dogg_publish(key, repo=None, push=True):
+    """Open the front door: publish this creature's public face from the owner's
+    own repo, so it can be summoned from anywhere in the rappidverse."""
+    rec = find_record(key)
+    if not rec:
+        sys.exit(f"no rappid matching '{key}'")
+    if not rec.get("birth"):
+        sys.exit(f"{rec['display_name']} has no sealed birth — an unattested creature "
+                 f"cannot enter the rappidverse (SPEC §12)")
+    frames = molting.read_frames(_record_dir_of(rec), rec)
+    door = front_door(rec, frames)
+    local = os.path.join(DEX_HOME, "dogg")
+    os.makedirs(local, exist_ok=True)
+    local_path = os.path.join(local, f"{door['chant']}.json")
+    with open(local_path, "w") as f:
+        json.dump(door, f, indent=2)
+    print(f"🚪  front door written · chant “{door['chant']}”")
+    repo = repo or os.environ.get("RAPPID_DOGG_REPO")
+    if not repo or not push:
+        print(f"    {local_path}")
+        print("    (set --repo owner/name or RAPPID_DOGG_REPO to publish it publicly)")
+        return door
+    checkout = os.path.join(DEX_HOME, "dogg-checkout")
+    try:
+        if os.path.isdir(os.path.join(checkout, ".git")):
+            subprocess.run(["git", "-C", checkout, "pull", "-q", "--rebase"], check=True)
+        else:
+            subprocess.run(["git", "clone", "-q", f"https://github.com/{repo}.git", checkout],
+                           check=True)
+        doors = os.path.join(checkout, "rappidverse", "doors")
+        os.makedirs(doors, exist_ok=True)
+        with open(os.path.join(doors, f"{door['chant']}.json"), "w") as f:
+            json.dump(door, f, indent=2)
+        index_path = os.path.join(checkout, "rappidverse", "index.json")
+        try:
+            with open(index_path) as f:
+                index = json.load(f)
+        except OSError:
+            index = {"schema": "rappid-rappidverse/1", "doors": {}}
+        index["doors"][door["chant"]] = {
+            "rappid": door["rappid"], "species": door["species"],
+            "display_name": door["display_name"], "standing": door["life"]["standing"],
+            "published_at": door["published_at"],
+        }
+        with open(index_path, "w") as f:
+            json.dump(index, f, indent=2)
+        subprocess.run(["git", "-C", checkout, "add", "-A"], check=True)
+        r = subprocess.run(["git", "-C", checkout, "commit", "-q", "-m",
+                            f"rappidverse: front door for {door['display_name']} ({door['chant']})"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            subprocess.run(["git", "-C", checkout, "push", "-q"], check=True)
+        raw = (f"https://raw.githubusercontent.com/{repo}/main/rappidverse/doors/"
+               f"{door['chant']}.json")
+        print(f"🌍  in the rappidverse · summon it anywhere with:")
+        print(f"    rappidex dogg summon {door['chant']} --repo {repo}")
+        print(f"    {raw}")
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️  could not publish to {repo}: {e}")
+        print(f"    the front door is still here: {local_path}")
+    return door
+
+def cmd_dogg_summon(chant, repo=None):
+    """Say the chant anywhere: fetch the public face, then lay whatever private
+    layer this device holds over the top."""
+    source = chant
+    if not chant.startswith("http"):
+        repo = repo or os.environ.get("RAPPID_DOGG_REPO")
+        local_path = os.path.join(DEX_HOME, "dogg", f"{chant}.json")
+        if os.path.exists(local_path):
+            source = local_path
+        elif repo:
+            source = (f"https://raw.githubusercontent.com/{repo}/main/rappidverse/doors/"
+                      f"{chant}.json")
+        else:
+            sys.exit("no front door for that chant here — pass --repo owner/name "
+                     "or RAPPID_DOGG_REPO to reach the rappidverse")
+    print(f"🕯  chanting “{chant}”…")
+    try:
+        if source.startswith("http"):
+            import urllib.request
+            with urllib.request.urlopen(source, timeout=30) as r:
+                door = json.load(r)
+        else:
+            with open(source) as f:
+                door = json.load(f)
+    except Exception as e:
+        sys.exit(f"the chant found nothing: {e}")
+    if door.get("schema") != DOGG_SCHEMA:
+        sys.exit("that is not a rappid front door")
+    egg = door.get("egg")
+    if not egg:
+        sys.exit("that front door carries no egg — nothing to summon")
+    payload = unpack_egg(egg)
+    genome = payload["genome"]
+    species = genome.get("species") if genome.get("species") in SPECIES else "wild"
+    gid = safe_gid(payload.get("id") or genome_id(genome))
+    existing = next((r for r in all_records() if r.get("genome_id") == gid), None)
+    dirname = f"{safe_slug(species)}-summoned-{gid}"
+    if existing:
+        rec = existing
+        print(f"🔮  {rec['display_name']} already stands here — laying the public face over it")
+    else:
+        rec = mint_record(species, genome, lineage=[f"summoned:{door.get('published_by','?')}"],
+                          slug=dirname, dirname=dirname)
+        rec["display_name"] = door.get("display_name") or rec["display_name"]
+        rec["rarity"] = door.get("rarity", rec["rarity"])
+        rec["egg"] = egg
+        rec["genome_id"] = gid
+        rec["rappid"] = door["rappid"]      # a summoned creature keeps its identity
+        rec["birth"] = door.get("birth", {})
+        rec["summoned_from"] = {"chant": door.get("chant"), "by": door.get("published_by"),
+                                "at": now_iso()}
+    door_shape = door.get("shape")
+    if door_shape and door_shape.get("agent_py"):
+        found_now = read_discovered()
+        entry = found_now.get(species) or {"name": door_shape.get("name", species),
+                                           "genus": "Inventa", "shape": door_shape.get("adapter_shape", "cli"),
+                                           "discovered_at": now_iso(), "host": hostslug()}
+        entry["shape_source"] = door_shape["agent_py"]
+        entry["shape_stats"] = door_shape.get("stats") or shape_stats(door_shape["agent_py"])
+        found_now[species] = entry
+        os.makedirs(DEX_HOME, exist_ok=True)
+        with open(os.path.join(DEX_HOME, "discovered-species.json"), "w") as f:
+            json.dump(found_now, f, indent=2)
+        print(f"🔑  its species' shape came with it — "
+              f"HT {entry['shape_stats']['height_m']:.2f} m, "
+              f"WT {entry['shape_stats']['weight_kb']:.2f} kb. "
+              f"You can reach that kind of AI now without a skill file.")
+    d = save_record(rec)
+    incoming = [f for f in door.get("frames", [])]
+    merged, delta = molting.merge(molting.read_frames(d, rec), incoming)
+    molting.write_frames(d, merged)
+    form = molting.fold(merged)
+    rec["molt"] = form
+    save_record(rec)
+    print(f"🐣  {rec['display_name']} answered — {form['standing']}, "
+          f"{form['frames']} frame(s), molt {form['molt_id']}")
+    if form.get("anchor"):
+        print(f"    born of the {form['anchor']['kind']} “{form['anchor']['title']}”")
+    if delta["kept"]:
+        print(f"    your private layer added {delta['kept']} frame(s) the front door "
+              f"never carried — GODD stays yours")
+    play_cry(rec)
+    return rec
 
 # ─────────────────────────────────────────────── the GODD layer (private save)
 GODD_REPO = os.environ.get("RAPPID_GODD_REPO") or "kody-w/RAPP-Private-Workspace"
@@ -1301,14 +1681,23 @@ def main():
     p = sub.add_parser("hatch"); p.add_argument("species")
     p.add_argument("--midwife", help="which hatcher adapter attests this birth")
     p.add_argument("--attempts", type=int, default=3)
+    p.add_argument("--anchor", help="a file, link or note this creature is born OF")
+    p.add_argument("--anchor-title", help="what to call that thing")
     p = sub.add_parser("discover"); p.add_argument("name")
     p.add_argument("--command", required=True, help="how to call this AI ({prompt} / {prompt_json})")
     p.add_argument("--shape", default="cli"); p.add_argument("--model"); p.add_argument("--genus")
     sub.add_parser("verify").add_argument("key")
+    p = sub.add_parser("shape"); p.add_argument("slug")
+    p.add_argument("--install", help="write the agent.py key into an agents/ directory")
+    p.add_argument("--source", action="store_true", help="print the agent.py itself")
     p = sub.add_parser("emit"); p.add_argument("slug"); p.add_argument("-o", "--out")
     p = sub.add_parser("bless"); p.add_argument("key"); p.add_argument("--midwife"); p.add_argument("--attempts", type=int, default=3)
     p = sub.add_parser("mutate"); p.add_argument("key")
     p.add_argument("kind", choices=sorted(molting.MUTATION_KINDS)); p.add_argument("note", nargs="?", default="")
+    p.add_argument("--anchor", help="a file, link or note this mutation came from")
+    p.add_argument("--anchor-title")
+    p = sub.add_parser("dogg"); p.add_argument("verb", choices=["publish", "summon", "chant"])
+    p.add_argument("key"); p.add_argument("--repo"); p.add_argument("--no-push", action="store_true")
     sub.add_parser("frames").add_argument("key")
     p = sub.add_parser("molt"); p.add_argument("key"); p.add_argument("other", nargs="?")
     p = sub.add_parser("roar"); p.add_argument("species"); p.add_argument("--done", action="store_true")
@@ -1324,11 +1713,22 @@ def main():
     a = ap.parse_args()
     os.makedirs(RAPPIDS, exist_ok=True)
     _load_discovered()
-    if a.cmd == "hatch": cmd_hatch(a.species, midwife=a.midwife, attempts=a.attempts)
+    if a.cmd == "hatch":
+        cmd_hatch(a.species, midwife=a.midwife, attempts=a.attempts,
+                  anchor=a.anchor, anchor_title=a.anchor_title)
     elif a.cmd == "discover":
         cmd_discover(a.name, a.command, shape=a.shape, model=a.model, genus=a.genus)
     elif a.cmd == "emit": cmd_emit(a.slug, a.out)
-    elif a.cmd == "mutate": cmd_mutate(a.key, a.kind, a.note)
+    elif a.cmd == "shape": cmd_shape(a.slug, install=a.install, show_source=a.source)
+    elif a.cmd == "mutate":
+        cmd_mutate(a.key, a.kind, a.note, anchor=a.anchor, anchor_title=a.anchor_title)
+    elif a.cmd == "dogg":
+        if a.verb == "publish": cmd_dogg_publish(a.key, a.repo, push=not a.no_push)
+        elif a.verb == "summon": cmd_dogg_summon(a.key, a.repo)
+        else:
+            rec = find_record(a.key)
+            if not rec: sys.exit(f"no rappid matching '{a.key}'")
+            print(chant_for(rec))
     elif a.cmd == "frames": cmd_frames(a.key)
     elif a.cmd == "molt": cmd_molt(a.key, a.other)
     elif a.cmd == "bless": cmd_bless(a.key, midwife=a.midwife, attempts=a.attempts)
@@ -1337,7 +1737,7 @@ def main():
         if not rec: sys.exit(f"no rappid matching '{a.key}'")
         b = rec.get("birth")
         if not b: sys.exit(f"{rec['display_name']} carries no birth record — it predates the rite")
-        good = rite.verify_seal(b)
+        good = rite.verify_seal(b, rec.get("rappid", ""), rec.get("species", ""))
         print(f"{'✅' if good else '❌'} {rec['display_name']} — birth seal "
               f"{'verifies' if good else 'DOES NOT verify'} "
               f"(sealed by {b['midwife']['name']}, motif {' '.join(map(str, b['motif']))})")

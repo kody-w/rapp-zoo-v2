@@ -1,6 +1,6 @@
-# rappidex/1 — the RAPPid Zoo species protocol
+# rappidex/1 — the RAPPID species protocol
 
-*The species layer of [RAPPid Zoo](README.md) (`kody-w/rapp-zoo-v2`).*
+*The species layer of [RAPPID](README.md) (`kody-w/rapp-zoo-v2`).*
 
 > Every AI is a **species**. Every running instance is a **rappid** — a creature
 > hatched on a host, with a sovereign identity, a voice, a hologram, and an egg.
@@ -105,6 +105,8 @@ into any zoo as species `wild`.
 | `verify <species\|id>` | re-check a birth seal and its burned-in transcript from the record alone |
 | `bless <species\|id>` | attest a creature that predates the rite: identity unchanged, seal marked `blessed` |
 | `emit <slug>` | lock a discovered species' shape in as a working `agent.py` + `rapp_skill.md` |
+| `shape <slug> [--install dir] [--source]` | the species' card (height, weight) and its key (§17) |
+| `hatch <species> --anchor <path\|text>` | born of a specific artifact (§16): the thing's digest shapes the creature |
 | `mutate <key> <kind> [note]` | earn a frame from something met in the field; grows a new sound role (§15) |
 | `frames <key>` | the creature's lineage: every frame, every dimension it has lived on |
 | `molt <key> [doc]` | reunion: fold two dimensions together, losing nothing from either |
@@ -178,16 +180,30 @@ alone: the species must answer for its own offspring, on this device, at hatch.
    minted rappid id: a three-stage cypher (shift → reverse → decoy-interleave)
    plus a motif request bounded to the species' MIDI register. Same creature,
    same rite, forever — so anyone can re-derive it.
-2. **The midwife** is an actual LLM, reached through a **hatcher adapter**
+2. **The midwife** is an actual LLM, reached through a **hatcher adapter**. A
+   shipped species must be attested by its own adapter; letting another species
+   stand in is allowed but must be asked for explicitly (`--midwife`), never
+   silently substituted.
    (`species/hatchers.json`): one entry per AI shape — `command` (with
    `{prompt}` / `{prompt_json}`), `shape` (`cli` | `http` | `sdk`), `model`,
    `timeout`. The zoo never guesses a provider's shape; adapters carry it.
-3. **Verification is cold.** The zoo knows the plaintext, so a wrong decode is
-   refused outright; the motif must land in the species' register. Only real
-   reasoning passes, and only from something running here — which is exactly
-   what proves the species exists on this device.
-4. **The seal** is `sha256(cypher ‖ decode ‖ motif)`, re-checkable from the
-   record alone (`rappidex verify <key>`). Tampering with either half breaks it.
+3. **Verification is cold.** The zoo re-derives the challenge from the
+   creature's own rappid id, so a wrong decode is refused outright and a
+   hand-authored "sealed" record cannot pass — the forger cannot make the
+   derivation produce a cypher they chose. The motif must land in the species'
+   register.
+   **What the rite proves, stated honestly:** that *something able to answer*
+   was reachable on this device at hatch time and produced a constrained,
+   verifiable artifact. It is proof of **presence and participation**, not proof
+   of intelligence: a determined script with a word list could also pass. The
+   value is that a rappid cannot exist without *something* standing behind it,
+   and that the standing-behind is recorded and re-checkable.
+4. **The seal** is `sha256(cypher ‖ decode ‖ motif)`. `rappidex verify <key>`
+   re-checks it **against a freshly derived challenge**, so verification needs
+   the creature's identity, not just its birth block: tampering with any part
+   breaks it, and so does a wholly invented record. A birth block handed over
+   without its creature cannot be "verified" — that case is refused, never
+   reported as good.
 5. **The motif becomes the voice.** It is written as a real `.mid` beside the
    creature (its birth song) and sets that individual's accent on the species
    call (`voice.rate` / `voice.vol`) — so the creature's sound descends from
@@ -241,6 +257,45 @@ rite over an existing record. The identity and genome never change; the seal
 carries `blessed: true` and the lineage records who attested it — an honest
 record of a birth witnessed late rather than a pretended one.
 
+## 17. Shapes (the key to a species)
+
+A **rappid shape is a RAPP `agent.py`** — the exact, runnable way to speak to
+one species of AI. It is the lock and key of the dex: meet a species once, keep
+its shape, and you never have to hand that kind of AI a skill file again.
+
+- `emit` writes the shape and records it **into the dex entry itself**
+  (`shape_source` + `shape_stats`), so the key travels with the species.
+- A shape has real dimensions, read from the shape itself:
+  **weight** = how much shape there is (the agent's bytes, in kb) ·
+  **height** = how much reach it has (its structure). Both are deterministic,
+  so the same species is the same size on every device.
+- `shape <slug>` prints the species' card; `shape <slug> --install <dir>` drops
+  the `agent.py` into an `agents/` directory, and that kind of AI is reachable
+  from there immediately; `shape <slug> --source` prints the key itself.
+- A front door (§10) carries the shape, so **summoning a creature teaches your
+  device its species** — the key arrives with the creature.
+
+## 16. Anchored births (a creature born of a thing)
+
+A hatch may be **anchored** to something the keeper found worth keeping: a
+journal entry, a photo, a clip, a link, or a line of text
+(`hatch <species> --anchor <path|text> [--anchor-title …]`).
+
+- The artifact's sha256 seeds the genome, so the thing it came from is visible
+  in what the creature *looks like* — two creatures of the same species born of
+  different artifacts are visibly different individuals.
+- The birth records an `rappid-anchor/1` block: `kind` (journal / image / video
+  / audio / document / link / note / artifact), `sha256`, `title`, `bytes`.
+  The **bytes never travel** — only the digest, kind, and title. Any local
+  pointer is kept outside the record's shareable fields.
+- **One creature per anchor**: hatching the same artifact again returns the
+  creature already born of it rather than minting a rival.
+- The anchor stays in the creature's lineage: its birth frame (§15) carries it,
+  so no amount of growth or molting loses what it was born of.
+
+An anchored creature is its own individual even within its species — it is
+named for its artifact and identified separately from the host's default one.
+
 ## 15. Frames, mutation, and the reunion molt
 
 A rappid is not fixed. What it **is** at any moment is a fold over its
@@ -280,8 +335,8 @@ This is how diversity accumulates: same starting species, different lives.
 4. Unknown species import as `wild`, never rejected.
 5. Cries: one per species; accent derived only from `genome_id`.
 6. Records never contain secrets, tokens, or PII. Eggs are shareable by design.
-7. Birth seals re-verify from the record alone; birth transcripts stay out of eggs.
+7. Birth seals re-verify only against a re-derived challenge (never self-consistency alone); birth transcripts stay out of eggs.
 8. Every rite appends one ledger line, sealed or refused.
 9. Merging frames is idempotent and order-independent; the fold is recomputed, never stored as truth (§15).
 
-*RAPPid Zoo · kody-w/rapp-zoo-v2 · MIT*
+*RAPPID · kody-w/rapp-zoo-v2 · MIT*

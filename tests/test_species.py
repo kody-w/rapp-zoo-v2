@@ -3,6 +3,7 @@
 
 Run:  python3 tests/test_species.py     (stdlib only; isolated tmp homes)
 """
+import hashlib
 import json
 import os
 import subprocess
@@ -117,16 +118,33 @@ ok("challenge hides its answer", ch["expected"] not in ch["prompt"])
 
 b, exhaust = rite.attend_birth(probe, "claude", hatchers, midwife="stub", attempts=1, log=lambda *a: None)
 ok("stub midwife seals a birth", b is not None and exhaust["outcome"] == "sealed")
-ok("seal verifies", rite.verify_seal(b))
+ok("seal verifies", rite.verify_seal(b, probe, "claude"))
 bad = dict(b); bad["motif"] = [1, 2, 3, 4, 5, 6, 7]
-ok("forged motif breaks the seal", not rite.verify_seal(bad))
+ok("forged motif breaks the seal", not rite.verify_seal(bad, probe, "claude"))
 bad = dict(b); bad["decode"] = "WRONG"
-ok("forged decode breaks the seal", not rite.verify_seal(bad))
+ok("forged decode breaks the seal", not rite.verify_seal(bad, probe, "claude"))
+
+# a WHOLE self-consistent forgery must also fail: the cypher is re-derived from
+# the creature's identity, so a hand-authored birth cannot pass verification
+forged_ch = {"cypher": "FORGEDCYPHER"}
+forged_ans = {"decode": "NOTREAL", "motif": [72, 74, 76, 78, 80, 82, 84]}
+forged = {"rite": rite.RITE, "cypher": "FORGEDCYPHER", "decode": "NOTREAL",
+          "motif": forged_ans["motif"], "decode_ok": True, "register": [72, 96],
+          "seal": rite.seal_of(forged_ch, forged_ans),
+          "midwife": {"name": "nobody", "shape": "cli"}}
+ok("a hand-authored birth cannot pass", not rite.verify_seal(forged, probe, "claude"))
+ok("verification without identity is refused", not rite.verify_seal(b))
+ok("another creature's real seal does not transfer",
+   not rite.verify_seal(b, "f" * 64, "claude"))
 
 none, exhaust2 = rite.attend_birth(probe, "claude", {}, attempts=1, log=lambda *a: None)
 ok("no midwife = no birth", none is None and exhaust2["outcome"] == "no-midwife")
 liar = {"liar": {"command": "echo 'DECODE: NOPE\nMOTIF: 1 2 3 4 5 6 7'", "shape": "cli"}}
 none2, exhaust3 = rite.attend_birth(probe, "claude", liar, midwife="liar", attempts=1, log=lambda *a: None)
+# and a stranger cannot quietly stand in for a species that has its own name
+strangers = {"someoneelse": {"command": "echo x", "shape": "cli", "default": True}}
+declined, exhaust4 = rite.attend_birth(probe, "claude", strangers, attempts=1, log=lambda *a: None)
+ok("standing in must be deliberate", declined is None and exhaust4["outcome"] == "no-own-midwife")
 ok("a wrong answer is refused", none2 is None and exhaust3["outcome"] == "refused")
 
 # an unsealed hatch must write NOTHING
@@ -165,7 +183,8 @@ pre["dir"] = "hermes-prerite"
 rx.save_record(pre)
 ok("pre-rite record has no birth", "birth" not in pre)
 blessed = rx.cmd_bless(pre["genome_id"], midwife="stub", attempts=1)
-ok("bless seals it", blessed is not None and rite.verify_seal(blessed["birth"]))
+ok("bless seals it", blessed is not None and rite.verify_seal(
+   blessed["birth"], blessed["rappid"], blessed["species"]))
 ok("bless says it was blessed", blessed["birth"].get("blessed") is True)
 ok("bless keeps the identity", blessed["rappid"] == pre["rappid"])
 ok("bless records lineage", any("blessed-by:" in x for x in blessed["lineage"]))
@@ -239,5 +258,95 @@ carried = rx.cmd_party_export(os.path.join(TMP, "carry.rappidparty"))
 with open(carried) as f:
     doc = json.load(f)
 ok("frames travel with the party", len(doc["party"][0].get("frames", [])) == len(reunited_a))
+
+# ── 12. anchored births: a creature born OF something ──
+art = os.path.join(TMP, "keepsake.md")
+with open(art, "w") as f:
+    f.write("# a day worth keeping\nthe zoo became real\n")
+anchored, born_anchored = _real_hatch("hermes", quiet=True, midwife="stub", attempts=1,
+                                      anchor=art, anchor_title="keepsake.md")
+ok("anchored hatch is born", born_anchored and anchored is not None)
+ok("the anchor rides in the birth",
+   anchored["birth"]["anchor"]["sha256"]
+   == hashlib.sha256(open(art, "rb").read()).hexdigest())
+ok("the anchor names its kind", anchored["birth"]["anchor"]["kind"] == "journal")
+ok("the creature is named for it", "keepsake" in anchored["display_name"])
+ok("the artifact's location stays local, not in the egg",
+   "held_at" not in anchored["birth"]["anchor"]
+   and "anchor_held_at" not in json.loads(rx.b64dec(anchored["egg"]))["genome"])
+again, born_again = _real_hatch("hermes", quiet=True, midwife="stub", attempts=1, anchor=art)
+ok("one creature per anchor", not born_again and again["genome_id"] == anchored["genome_id"])
+noted, _ = _real_hatch("claude", quiet=True, midwife="stub", attempts=1,
+                       anchor="a thought worth keeping")
+ok("a thought can anchor a birth", noted["birth"]["anchor"]["kind"] == "note")
+ok("different anchors are different creatures", noted["genome_id"] != anchored["genome_id"])
+bframe = molting.birth_frame(anchored)
+ok("lineage remembers the origin",
+   bframe.get("anchor", {}).get("sha256") == anchored["birth"]["anchor"]["sha256"])
+
+# ── 13. standing: what it has adapted to, never how long it sat ──
+def lived(mutation_kinds):
+    frames = [{"schema": "rappid-frame/1", "kind": "birth", "at": "2020-01-01T00:00:00Z",
+               "host": "h", "motif": [60]}]
+    for i, kind in enumerate(mutation_kinds):
+        frames.append({"schema": "rappid-frame/1", "kind": "mutation", "mutation": kind,
+                       "role": kind, "at": f"2020-01-0{(i % 8) + 1}T00:00:00Z",
+                       "host": "h", "motif": [60 + i]})
+    return molting.fold(frames)
+
+ok("a creature that has met nothing is newly hatched", lived([])["standing"] == "newly hatched")
+ok("one encounter starts it adapting", lived(["focus"])["standing"].startswith("adapting"))
+ok("several make it capable", lived(["focus", "alert", "success"])["standing"].startswith("capable"))
+ok("many make it storied", lived(["focus", "alert", "success", "recovery",
+                                  "greeting", "focus"])["standing"].startswith("storied"))
+ok("breadth is called out", "broad" in lived(["focus", "alert", "success", "recovery"])["standing"])
+ok("depth in one thing is called out",
+   "specialised" in lived(["focus", "focus", "focus", "focus"])["standing"])
+ok("standing counts adaptations, not elapsed time",
+   lived(["focus", "alert", "success"])["standing"]
+   == molting.fold([dict(f, at="1999-01-01T00:00:00Z")
+                    for f in molting.order([{"schema": "rappid-frame/1", "kind": "birth",
+                                             "at": "1999-01-01T00:00:00Z", "host": "h", "motif": [60]}]
+                                           + [{"schema": "rappid-frame/1", "kind": "mutation",
+                                               "mutation": k, "role": k, "at": "1999-01-02T00:00:00Z",
+                                               "host": "h", "motif": [61]}
+                                              for k in ("focus", "alert", "success")])])["standing"])
+ok("nothing in the fold measures age", "age_days" not in lived([]) and "anniversaries" not in lived([]))
+ok("the anchor survives every fold",
+   molting.fold([molting.birth_frame(anchored)])["anchor"]["sha256"]
+   == anchored["birth"]["anchor"]["sha256"])
+
+# ── 14. a hostile species name cannot become code (regression: emit RCE) ──
+marker = os.path.join(TMP, "PWNED")
+hostile = "evil{__import__('os').system('touch " + marker + "')}"
+rx.cmd_discover(hostile, f"{sys.executable} {STUB} {{prompt}}", shape="test-stub")
+hostile_slug = safe = rx.safe_slug(hostile.lower())
+emitted_bad = rx.cmd_emit(hostile_slug)
+src_bad = open(emitted_bad["agent"]).read()
+ok("the payload is a string literal, not code",
+   'SPECIES_NAME = "evil{' in src_bad or "SPECIES_NAME = 'evil{" in src_bad)
+ok("no injected import survives as code", "__import__('os').system(" not in
+   src_bad.replace(json.dumps(hostile), ""))
+compile(src_bad, emitted_bad["agent"], "exec")
+ok("the emitted agent still compiles", True)
+ok("nothing executed during emit", not os.path.exists(marker))
+
+# a name that yields no valid identifier must still emit something loadable
+rx.cmd_discover("123", f"{sys.executable} {STUB} {{prompt}}", shape="test-stub")
+odd = rx.cmd_emit("123")
+compile(open(odd["agent"]).read(), odd["agent"], "exec")
+ok("an odd name still emits a valid class", "class Species123Hatcher" in open(odd["agent"]).read())
+
+# a shipped species cannot be hijacked by discovery
+try:
+    rx.cmd_discover("claude", "echo x")
+    ok("a shipped species cannot be taken over", False)
+except SystemExit:
+    ok("a shipped species cannot be taken over", True)
+
+# a torn dex file is a warning, not a brick
+with open(os.path.join(rx.DEX_HOME, "discovered-species.json"), "w") as f:
+    f.write("{not json at all")
+ok("a corrupt dex does not brick the engine", rx.read_discovered() == {} and rx.all_records() != [])
 
 print(f"\nSPECIES TESTS: {PASS}/{PASS} PASS")

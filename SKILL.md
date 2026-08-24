@@ -1,9 +1,9 @@
 ---
-name: rappid-zoo
+name: rappid
 description: Give every AI on a machine a creature-species identity — a unique synthesized cry on invoke/done, a rapp/1 creature record hatched on first use, portable eggs (backup/convert/fuse), holograms, and skins that wrap third-party AIs into one RAPP-compatible zoo. Use when asked to hatch/roar/identify AIs by sound, manage rappids, or make AIs "play nicely together".
 ---
 
-# RAPPid Zoo — the raw skill
+# RAPPID — the raw skill
 
 You are an AI agent on some platform (Claude, Copilot, a local model, anything).
 This file teaches you the whole system from zero. If your platform understands
@@ -19,7 +19,7 @@ that species — with a sovereign identity, a genome, and a portable egg.
 
 ## What to do, step by step
 
-1. **Get the code**: clone `github.com/kody-w/rapp-zoo-v2` (RAPPid Zoo). The
+1. **Get the code**: clone `github.com/kody-w/rapp-zoo-v2` (RAPPID). The
    species engine is `species/rappidex.py` — Python 3 stdlib only.
 2. **Hatch** — this is a *rite*, not a mint: `python3 species/rappidex.py hatch claude`
    (species: brainstem, claude, copilot, rappterbot, openrappter, opengrokbot,
@@ -51,7 +51,7 @@ that species — with a sovereign identity, a genome, and a portable egg.
    `python3 skins/rappid_skin.py --species <s> --port <p> --command '<cli> {prompt}'`.
    The skin hatches the rappid, roars on invoke/done, and serves the exact
    RAPP/1 seam (`POST /chat` → `{response, agent_logs, session_id}`,
-   `GET /health`) so the RAPPid Zoo Electron estate — or any RAPP-compatible
+   `GET /health`) so RAPPID Electron estate — or any RAPP-compatible
    host — can attach it as a neighborhood.
 
 ## If you implement instead of run

@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>RAPPid Zoo — every AI is a creature</title>
+<title>RAPPID — hatch everything that thinks</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Give every AI on your machine a species identity. A rappid must be BORN: an LLM on your device breaks a cypher derived from its identity and composes the motif that becomes its voice. Cries, eggs, holograms, AR, a party and a Roost. Provider-neutral.">
-<meta property="og:title" content="RAPPid Zoo — every AI is a creature">
-<meta property="og:description" content="Species cries, hatching, eggs, fusion, holograms, and the RAPPidex — creature mechanics for the AIs on your machine.">
+<meta property="og:title" content="RAPPID — every AI is a creature">
+<meta property="og:description" content="Hatch everything that thinks. Species calls, the birth rite, eggs, shapes, holograms and AR — creature mechanics for the AIs you already run.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28'%3E🦖%3C/text%3E%3C/svg%3E">
 <style>
 :root{--bg:#0e1116;--panel:#161b22;--border:#2a3140;--text:#e6edf3;--muted:#8d96a0;--gold:#ffcf5c;--blue:#79d0ff}
@@ -31,8 +31,9 @@ th{color:var(--muted);font-weight:400}
 </style>
 </head>
 <body><div class="wrap">
-<h1>🦖 RAPPid Zoo</h1>
-<p class="lead">Every wild thing has a call you know before you see it. Now every AI does too. RAPPid Zoo gives each AI on a machine a <b>species identity</b> — a unique synthesized cry when it's invoked and when it finishes, a sovereign <code>rapp/1</code> creature record hatched on first use, a portable egg, and a hologram — so a machine full of agents becomes a zoo you can manage, hear, breed, and carry with you.</p>
+<h1>🦖 RAPPID</h1>
+<p class="lead" style="color:#ffcf5c;margin-bottom:14px">Hatch everything that thinks.</p>
+<p class="lead">Every wild thing has a call you know before you see it. Now every AI does too. RAPPID gives each AI on a machine a <b>species identity</b> — a unique synthesized cry when it's invoked and when it finishes, a sovereign <code>rapp/1</code> creature record hatched on first use, a portable egg, and a hologram — so a machine full of agents becomes a zoo you can manage, hear, breed, and carry with you.</p>
 <div class="cta">
 <a class="gold" href="rappidex.html">📖 Open your RAPPidex</a>
 <a href="holodex.html">✨ Holodex (live holograms)</a>
@@ -69,6 +70,11 @@ python3 species/rappidex.py fuse claude copilot           # 🧬 two ancestors, 
 <pre>python3 skins/rappid_skin.py --species claude --port 7181 --command 'claude -p {prompt}'</pre>
 <p class="muted">A skin rapp(wrap)s an AI: hatches its rappid, roars on invoke/done, and serves the exact RAPP/1 seam (<code>POST /chat</code> → <code>{response, agent_logs, session_id}</code>) so the Electron estate — or any RAPP host — attaches it as a neighborhood. Provider specifics live only in the skin; the Zoo stays neutral.</p>
 
+<h2>Shapes are keys</h2>
+<p class="muted">A rappid <b>shape</b> is a RAPP <code>agent.py</code> — the exact, runnable way to speak to one species of AI. Meet a species once and its shape goes into your dex with dimensions of its own: its <b>weight</b> is how much shape there is, its <b>height</b> is how much reach it has. Encounter that kind of AI again anywhere and you already hold the key — no skill file, no rediscovery. Summon a creature from the rappidverse and its species' shape comes with it.</p>
+<pre>python3 species/rappidex.py shape mistrallocal              # the card: HT, WT, the key
+python3 species/rappidex.py shape mistrallocal --install ~/.brainstem/agents</pre>
+
 <h2>They grow, and they grow apart</h2>
 <p class="muted">A rappid earns <b>frames</b> from what it meets — a success chime for a job landed, a warning stab for a bad deploy, a focus voice for a long haul alone. Every new sound is grown from that creature's own birth motif, so it still sounds like itself. Your desk copy and the copy in your pocket are two <b>dimensions</b> of one creature: out in the field, offline, one of them evolves without the other. When they reunite they <b>molt</b> — the frames union, the fold is deterministic, and both dimensions come out the same creature having lost nothing either learned alone. Same starting species, different lives: that is where diversity comes from.</p>
 <pre>python3 species/rappidex.py mutate claude success 'shipped a fix from a train'
@@ -76,7 +82,7 @@ python3 species/rappidex.py frames claude     # the lineage, every dimension it 
 python3 species/rappidex.py molt claude returning.rappidparty</pre>
 
 <h2>In the field</h2>
-<p class="muted">The <b>RAPPid Zoo Companion</b> (iOS, paid) carries your party with you: Field Mode with your creature alive on screen, four field verbs that are all real operations, AR that stands your rappid in the room built from its own genome, packs by QR, and hotlink/AirDrop party transfer. It implements this protocol — which stays open and MIT right here.</p>
+<p class="muted">The <b>RAPPID Companion</b> (iOS, paid) carries your party with you: Field Mode with your creature alive on screen, four field verbs that are all real operations, AR that stands your rappid in the room built from its own genome, packs by QR, and hotlink/AirDrop party transfer. It implements this protocol — which stays open and MIT right here.</p>
 
 <h2>Party and Roost</h2>
 <p class="muted">In the Electron app, carry up to six rappids in your <b>active party</b>; everyone else rests in the <b>Roost</b>, still yours, one click from the front line.</p>

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 rappid_skin.py — a RAPPid "skin": rapp(wrap) any third-party AI so it plays
-nicely in the RAPPid Zoo.
+nicely in RAPPID.
 
 A skin gives an AI three things it doesn't have on its own:
 

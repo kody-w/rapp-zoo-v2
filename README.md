@@ -1,5 +1,9 @@
 # 🦖 RAPPID
 
+<!-- rapp1:network-header:start -->
+[![RAPP/1](https://kody-w.github.io/rapp-hive-public/portfolio/badges/rapp-zoo-v2.svg)](https://github.com/kody-w/rapp-hive-public/blob/main/portfolio/repos/rapp-zoo-v2.md) · **New to RAPP?** [Start here: get your Brainstem →](https://github.com/kody-w/rapp-installer#start-here)
+<!-- rapp1:network-header:end -->
+
 > **Every AI is a creature. Every creature has a call.**
 >
 > *Hatch everything that thinks.*
